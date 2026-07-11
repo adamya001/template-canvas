@@ -390,48 +390,49 @@ app.post("/api/send-email", async (req, res) => {
     const base64Data = pdfBase64.includes(",") ? pdfBase64.split(",")[1] : pdfBase64;
     const pdfBuffer = Buffer.from(base64Data, "base64");
 
-    const smtpHost = process.env.SMTP_HOST;
-    const smtpPort = process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : 587;
-    const smtpUser = process.env.SMTP_USER;
-    const smtpPass = process.env.SMTP_PASS;
+    const brevoApiKey = process.env.BREVO_API_KEY;
+    const senderEmail = process.env.BREVO_SENDER_EMAIL || process.env.SMTP_USER;
 
-    if (!smtpHost || !smtpUser || !smtpPass) {
-      console.warn("SMTP credentials not configured. Please define SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS in .env.");
+    if (!brevoApiKey || !senderEmail) {
+      console.warn("Brevo API credentials not configured. Please define BREVO_API_KEY and BREVO_SENDER_EMAIL in .env.");
       return res.json({
         success: true,
         smtpConfigured: false,
-        message: `Certificate compiled! Email simulated successfully to ${to} (to send real emails, please configure SMTP_HOST, SMTP_PORT, SMTP_USER, and SMTP_PASS in your environment secrets).`
+        message: `Certificate compiled! Email simulated successfully to ${to} (to send real emails, please configure BREVO_API_KEY and BREVO_SENDER_EMAIL in your environment secrets).`
       });
     }
 
-    const transporter = nodemailer.createTransport({
-      host: smtpHost,
-      port: smtpPort,
-      secure: smtpPort === 465,
-      auth: {
-        user: smtpUser,
-        pass: smtpPass,
-      },
-    });
-
-    const mailOptions = {
-      from: smtpUser,
-      to,
+    const payload = {
+      sender: { email: senderEmail, name: "Verified Academy" },
+      to: [{ email: to }],
       subject: subject || "Your Digital Certificate of Completion",
-      text: body || `Dear Student,\n\nPlease find attached your digital Certificate of Completion.\n\nBest regards,\nAcademy Team`,
-      attachments: [
+      htmlContent: body ? body.replace(/\n/g, "<br>") : `Dear Student,<br><br>Please find attached your digital Certificate of Completion.<br><br>Best regards,<br>Academy Team`,
+      attachment: [
         {
-          filename: fileName,
-          content: pdfBuffer,
-          contentType: "application/pdf"
+          name: fileName,
+          content: base64Data
         }
       ]
     };
 
-    await transporter.sendMail(mailOptions);
+    const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+      method: "POST",
+      headers: {
+        "accept": "application/json",
+        "api-key": brevoApiKey,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const responseData = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(responseData.message || JSON.stringify(responseData) || "Brevo API rejected the request");
+    }
+
     res.json({ success: true, smtpConfigured: true, message: `Email successfully sent to ${to} with certificate attached!` });
   } catch (error: any) {
-    console.error("Nodemailer error:", error);
+    console.error("Email API error:", error);
     res.status(500).json({ error: "Failed to send email", details: error.message });
   }
 });
