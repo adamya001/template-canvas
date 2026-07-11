@@ -674,7 +674,9 @@ export default function AdminPanel({
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Email delivery failed");
+      if (!res.ok) {
+        throw new Error(data.details || data.error || "Email delivery failed");
+      }
 
       triggerToast(data.message, "success");
     } catch (e: any) {
@@ -728,9 +730,13 @@ export default function AdminPanel({
             } else {
               mockCount++;
             }
+          } else {
+            console.error(`Backend error for ${cert.email}:`, data.details || data.error);
+            triggerToast(`Error emailing ${cert.fullName}: ${data.details || data.error}`, "error");
           }
         } catch (e: any) {
           console.error(`Error emailing ${cert.fullName}:`, e);
+          triggerToast(`Failed to email ${cert.fullName}: ${e.message}`, "error");
         }
       }
       setIsProcessing(false);
