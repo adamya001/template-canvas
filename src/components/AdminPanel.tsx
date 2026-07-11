@@ -456,35 +456,106 @@ export default function AdminPanel({
     }
   };
 
+  // Shared HTML Template for both Print and Hidden PDF generation
+  const getCertificateHTML = (cert: Partial<CertificateRecord>) => {
+    const bodyText = certConfig.bodyTemplate
+      .replace("{courseDomain}", cert.courseDomain || "Course Name")
+      .replace("{duration}", cert.duration || "Duration")
+      .replace("{batch}", cert.batch || "Batch ID");
+
+    return `
+      <html>
+        <head>
+          <title>Certificate - ${cert.fullName}</title>
+          <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;0,800;1,400&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+          <style>
+            @page { size: letter landscape; margin: 0; }
+            body { margin: 0; padding: 0; font-family: 'Inter', sans-serif; background-color: #ffffff; display: flex; align-items: center; justify-content: center; height: 100vh; -webkit-print-color-adjust: exact; }
+            .certificate-container { width: 1056px; height: 816px; box-sizing: border-box; padding: 80px; background-color: ${certConfig.backgroundColor}; border: 24px solid #ffffff; box-shadow: inset 0 0 0 3px ${certConfig.accentColor}; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: space-between; text-align: center; }
+            .certificate-border-thin { position: absolute; top: 20px; left: 20px; right: 20px; bottom: 20px; border: 1px solid ${certConfig.accentColor}4D; pointer-events: none; }
+            .header-title { font-family: 'Playfair Display', serif; font-size: 14px; font-weight: 800; text-transform: uppercase; letter-spacing: 6px; color: ${certConfig.accentColor}; margin-top: 20px; }
+            .main-title { font-family: 'Playfair Display', serif; font-size: 42px; font-weight: 800; color: #111111; letter-spacing: 2px; margin-top: 10px; margin-bottom: 0px; }
+            .sub-title { font-family: 'Playfair Display', serif; font-style: italic; font-size: 18px; color: #666666; margin-top: 15px; }
+            .recipient-name { font-family: 'Playfair Display', serif; font-size: 46px; font-weight: 800; color: #1E293B; border-bottom: 2px solid ${certConfig.accentColor}; padding-bottom: 8px; min-width: 450px; margin: 20px auto; letter-spacing: 1px; }
+            .achievement-text { font-size: 14px; line-height: 1.8; color: #4A5568; max-width: 680px; margin: 10px auto; }
+            .achievement-text strong { color: #111111; font-weight: 700; }
+            .footer-info { display: flex; width: 100%; justify-content: space-between; padding: 0 40px; margin-top: 40px; box-sizing: border-box; }
+            .signature-block { display: flex; flex-direction: column; align-items: center; width: 200px; }
+            .signature-line { width: 100%; border-top: 1px solid #A0AEC0; margin-top: 30px; padding-top: 8px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: #718096; }
+            .signature-handwritten { font-family: 'Playfair Display', serif; font-style: italic; font-size: 20px; color: #2D3748; margin-bottom: -15px; }
+            .seal-gold { width: 70px; height: 70px; background-color: ${certConfig.accentColor}; border-radius: 50%; position: relative; display: flex; align-items: center; justify-content: center; color: #ffffff; font-weight: bold; font-size: 10px; letter-spacing: 1px; box-shadow: 0 0 0 4px ${certConfig.backgroundColor}, 0 0 0 6px ${certConfig.accentColor}; margin-top: 10px; }
+          </style>
+        </head>
+        <body>
+          <div class="certificate-container" id="certificate-pdf-capture-iframe">
+            <div class="certificate-border-thin"></div>
+            <div>
+              <div class="header-title">${certConfig.header}</div>
+              <div class="main-title">${certConfig.title}</div>
+            </div>
+            <div>
+              <div class="sub-title">${certConfig.subHeader}</div>
+              <div class="recipient-name">${cert.fullName}</div>
+              <div class="achievement-text">${bodyText}</div>
+            </div>
+            <div class="footer-info">
+              <div class="signature-block">
+                <div class="signature-handwritten">${certConfig.studiesDirectorName}</div>
+                <div class="signature-line">${certConfig.studiesDirectorTitle}</div>
+              </div>
+              <div style="display: flex; flex-direction: column; align-items: center;">
+                <div class="seal-gold">${certConfig.sealText}</div>
+              </div>
+              <div class="signature-block">
+                <div class="signature-handwritten">${certConfig.leadInstructorName}</div>
+                <div class="signature-line">${certConfig.leadInstructorTitle}</div>
+              </div>
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
+  };
+
+  const generatePDFBase64FromIframe = async (cert: Partial<CertificateRecord>): Promise<string> => {
+    return new Promise(async (resolve, reject) => {
+      try {
+        const iframe = document.createElement("iframe");
+        iframe.style.position = "fixed";
+        iframe.style.right = "100vw";
+        iframe.style.width = "1056px";
+        iframe.style.height = "816px";
+        document.body.appendChild(iframe);
+
+        const doc = iframe.contentWindow?.document;
+        if (!doc) throw new Error("Iframe document not accessible");
+
+        doc.open();
+        doc.write(getCertificateHTML(cert));
+        doc.close();
+
+        // Wait for fonts to load
+        await new Promise(r => setTimeout(r, 800));
+
+        const element = doc.getElementById("certificate-pdf-capture-iframe");
+        if (!element) throw new Error("Capture container not found in iframe");
+
+        const canvas = await html2canvas(element, { scale: 2, useCORS: true, backgroundColor: null });
+        const imgData = canvas.toDataURL("image/png");
+        const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "letter" });
+        pdf.addImage(imgData, "PNG", 0, 0, 279.4, 215.9);
+        
+        document.body.removeChild(iframe);
+        resolve(await getPdfBase64(pdf));
+      } catch (err) {
+        reject(err);
+      }
+    });
+  };
+
   // Direct PDF compilation & upload helper (Returns public URL)
   const generateAndUploadPDF = async (record: Partial<CertificateRecord>): Promise<string> => {
-    // Set previewRecord temporarily to trigger hidden element update
-    setPreviewRecord(record);
-    
-    // Give react time to render the hidden DOM element
-    await new Promise(resolve => setTimeout(resolve, 150));
-    
-    const element = document.getElementById("certificate-pdf-capture");
-    if (!element) {
-      throw new Error("PDF Capture Container not found in DOM.");
-    }
-    
-    const canvas = await safeHtml2Canvas(element, {
-      scale: 2, // High-fidelity capture
-      useCORS: true,
-      backgroundColor: null
-    });
-    
-    const imgData = canvas.toDataURL("image/png");
-    const pdf = new jsPDF({
-      orientation: "landscape",
-      unit: "mm",
-      format: "letter"
-    });
-    
-    // Letter Landscape dimensions
-    pdf.addImage(imgData, "PNG", 0, 0, 279.4, 215.9);
-    const pdfBase64 = await getPdfBase64(pdf);
+    const pdfBase64 = await generatePDFBase64FromIframe(record);
     const fileName = `certificate_${(record.fullName || "recipient").toLowerCase().replace(/\s+/g, "_")}.pdf`;
     
     const res = await fetch("/api/upload-pdf", {
@@ -513,195 +584,16 @@ export default function AdminPanel({
       return;
     }
 
-    const bodyText = certConfig.bodyTemplate
-      .replace("{courseDomain}", cert.courseDomain || "Course Name")
-      .replace("{duration}", cert.duration || "Duration")
-      .replace("{batch}", cert.batch || "Batch ID");
-
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>Certificate - ${cert.fullName}</title>
-          <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;0,800;1,400&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-          <style>
-            @page {
-              size: letter landscape;
-              margin: 0;
-            }
-            body {
-              margin: 0;
-              padding: 0;
-              font-family: 'Inter', sans-serif;
-              background-color: #ffffff;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              height: 100vh;
-              -webkit-print-color-adjust: exact;
-            }
-            .certificate-container {
-              width: 1056px;
-              height: 816px;
-              box-sizing: border-box;
-              padding: 80px;
-              background-color: ${certConfig.backgroundColor};
-              border: 24px solid #ffffff;
-              box-shadow: inset 0 0 0 3px ${certConfig.accentColor};
-              position: relative;
-              display: flex;
-              flex-direction: column;
-              align-items: center;
-              justify-content: space-between;
-              text-align: center;
-            }
-            .certificate-border-thin {
-              position: absolute;
-              top: 20px;
-              left: 20px;
-              right: 20px;
-              bottom: 20px;
-              border: 1px solid ${certConfig.accentColor}4D;
-              pointer-events: none;
-            }
-            .header-title {
-              font-family: 'Playfair Display', serif;
-              font-size: 14px;
-              font-weight: 800;
-              text-transform: uppercase;
-              letter-spacing: 6px;
-              color: ${certConfig.accentColor};
-              margin-top: 20px;
-            }
-            .main-title {
-              font-family: 'Playfair Display', serif;
-              font-size: 42px;
-              font-weight: 800;
-              color: #111111;
-              letter-spacing: 2px;
-              margin-top: 10px;
-              margin-bottom: 0px;
-            }
-            .sub-title {
-              font-family: 'Playfair Display', serif;
-              font-style: italic;
-              font-size: 18px;
-              color: #666666;
-              margin-top: 15px;
-            }
-            .recipient-name {
-              font-family: 'Playfair Display', serif;
-              font-size: 46px;
-              font-weight: 800;
-              color: #1E293B;
-              border-bottom: 2px solid ${certConfig.accentColor};
-              padding-bottom: 8px;
-              min-width: 450px;
-              margin: 20px auto;
-              letter-spacing: 1px;
-            }
-            .achievement-text {
-              font-size: 14px;
-              line-height: 1.8;
-              color: #4A5568;
-              max-width: 680px;
-              margin: 10px auto;
-            }
-            .achievement-text strong {
-              color: #111111;
-              font-weight: 700;
-            }
-            .footer-info {
-              display: flex;
-              width: 100%;
-              justify-content: space-between;
-              padding: 0 40px;
-              margin-top: 40px;
-              box-sizing: border-box;
-            }
-            .signature-block {
-              display: flex;
-              flex-direction: column;
-              align-items: center;
-              width: 200px;
-            }
-            .signature-line {
-              width: 100%;
-              border-top: 1px solid #A0AEC0;
-              margin-top: 30px;
-              padding-top: 8px;
-              font-size: 11px;
-              font-weight: 600;
-              text-transform: uppercase;
-              letter-spacing: 1px;
-              color: #718096;
-            }
-            .signature-handwritten {
-              font-family: 'Playfair Display', serif;
-              font-style: italic;
-              font-size: 20px;
-              color: #2D3748;
-              margin-bottom: -15px;
-            }
-            .seal-gold {
-              width: 70px;
-              height: 70px;
-              background-color: ${certConfig.accentColor};
-              border-radius: 50%;
-              position: relative;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              color: #ffffff;
-              font-weight: bold;
-              font-size: 10px;
-              letter-spacing: 1px;
-              box-shadow: 0 0 0 4px ${certConfig.backgroundColor}, 0 0 0 6px ${certConfig.accentColor};
-              margin-top: 10px;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="certificate-container">
-            <div class="certificate-border-thin"></div>
-            
-            <div>
-              <div class="header-title">${certConfig.header}</div>
-              <div class="main-title">${certConfig.title}</div>
-            </div>
-
-            <div>
-              <div class="sub-title">${certConfig.subHeader}</div>
-              <div class="recipient-name">${cert.fullName}</div>
-              <div class="achievement-text">
-                ${bodyText}
-              </div>
-            </div>
-
-            <div class="footer-info">
-              <div class="signature-block">
-                <div class="signature-handwritten">${certConfig.studiesDirectorName}</div>
-                <div class="signature-line">${certConfig.studiesDirectorTitle}</div>
-              </div>
-
-              <div style="display: flex; flex-direction: column; align-items: center;">
-                <div class="seal-gold">${certConfig.sealText}</div>
-              </div>
-
-              <div class="signature-block">
-                <div class="signature-handwritten">${certConfig.leadInstructorName}</div>
-                <div class="signature-line">${certConfig.leadInstructorTitle}</div>
-              </div>
-            </div>
-          </div>
-          <script>
-            window.onload = function() {
-              window.print();
-              setTimeout(function() { window.close(); }, 500);
-            };
-          </script>
-        </body>
-      </html>
-    `);
+    const html = getCertificateHTML(cert);
+    printWindow.document.write(html.replace("</body>", `
+      <script>
+        window.onload = function() {
+          window.print();
+          setTimeout(function() { window.close(); }, 500);
+        };
+      </script>
+      </body>
+    `));
     printWindow.document.close();
   };
 
@@ -764,18 +656,8 @@ export default function AdminPanel({
     setIsProcessing(true);
     setProcessingStatus(`Generating and emailing PDF certificate to ${cert.email}...`);
     try {
-      // Direct base64 PDF generation
-      setPreviewRecord(cert);
-      await new Promise(resolve => setTimeout(resolve, 150));
-
-      const element = document.getElementById("certificate-pdf-capture");
-      if (!element) throw new Error("Capture container not found");
-
-      const canvas = await safeHtml2Canvas(element, { scale: 2, useCORS: true });
-      const imgData = canvas.toDataURL("image/png");
-      const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "letter" });
-      pdf.addImage(imgData, "PNG", 0, 0, 279.4, 215.9);
-      const pdfBase64 = await getPdfBase64(pdf);
+      // Generate PDF Base64 via Iframe exactly the same as print
+      const pdfBase64 = await generatePDFBase64FromIframe(cert);
       const fileName = `certificate_${cert.fullName.toLowerCase().replace(/\s+/g, "_")}.pdf`;
 
       const res = await fetch("/api/send-email", {
