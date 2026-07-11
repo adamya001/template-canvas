@@ -1,0 +1,6 @@
+{
+  "name": "Template Canvas",
+  "description": "A high-performance Canva-inspired Template Generator. Customize and design premium Wedding, Document, Form, and Email templates with visual editors, drag-and-drop elements, and AI-powered copywriting powered by Gemini.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
