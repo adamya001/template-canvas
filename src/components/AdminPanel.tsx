@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import html2canvas from "html2canvas";
+import JSZip from "jszip";
 
 // High-fidelity style-sheet sanitization helper for html2canvas
 // This ensures that modern CSS color formats (like oklch in Tailwind CSS v4) 
@@ -685,75 +686,6 @@ export default function AdminPanel({
     }
   };
 
-  // Bulk WhatsApp dispatcher
-  const handleBulkWhatsApp = async () => {
-    const toSend = selectedRecordIds.length > 0 
-      ? records.filter(r => selectedRecordIds.includes(r.id))
-      : records;
-      
-    if (toSend.length === 0) {
-      triggerToast("Please select at least one certificate from the table or add records.", "error");
-      return;
-    }
-
-    triggerConfirm(`You are about to compile and dispatch ${toSend.length} PDF certificates over WhatsApp. Proceed?`, async () => {
-      setIsProcessing(true);
-      for (let i = 0; i < toSend.length; i++) {
-        const cert = toSend[i];
-        setProcessingStatus(`Compiling and dispatching ${i + 1} of ${toSend.length}: ${cert.fullName}...`);
-        
-        // Open a blank tab synchronously
-        const newWindow = window.open("", "_blank");
-        if (newWindow) {
-          newWindow.document.write(`
-            <html>
-              <head>
-                <title>Preparing WhatsApp Share</title>
-                <style>
-                  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background-color: #f8fafc; color: #475569; margin: 0; }
-                  .loader { border: 4px solid #e2e8f0; border-top: 4px solid #10b981; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin-bottom: 20px; }
-                  @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-                  h3 { margin: 0; font-size: 16px; color: #1e293b; }
-                  p { margin: 8px 0 0; font-size: 13px; color: #64748b; }
-                </style>
-              </head>
-              <body>
-                <div class="loader"></div>
-                <h3>Generating Bulk Certificate PDF</h3>
-                <p>Compiling document for ${cert.fullName}...</p>
-              </body>
-            </html>
-          `);
-        }
-
-        try {
-          const pdfUrl = await generateAndUploadPDF(cert);
-          const text = `Hello ${cert.fullName},\n\nCongratulations on successfully completing "${cert.courseDomain}"!\n\nYour official digital Certificate of Completion is ready. Download your high-resolution PDF certificate directly here:\n👉 ${pdfUrl}\n\nBest regards,\nVerified Academy Team`;
-          
-          const phone = cert.whatsAppNumber || "";
-          const formattedPhone = phone.replace(/[^0-9+]/g, "");
-          const url = `https://api.whatsapp.com/send?phone=${encodeURIComponent(formattedPhone)}&text=${encodeURIComponent(text)}`;
-          
-          if (newWindow) {
-            newWindow.location.href = url;
-          } else {
-            window.open(url, "_blank");
-          }
-          // Stagger to avoid browser popup limits
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        } catch (e: any) {
-          console.error(`Error processing WhatsApp for ${cert.fullName}:`, e);
-          if (newWindow) {
-            newWindow.close();
-          }
-        }
-      }
-      setIsProcessing(false);
-      setProcessingStatus("");
-      triggerToast("Bulk WhatsApp dispatch complete!", "success");
-    });
-  };
-
   // Bulk Email dispatcher
   const handleBulkEmail = async () => {
     const toSend = selectedRecordIds.length > 0 
@@ -774,17 +706,7 @@ export default function AdminPanel({
         const cert = toSend[i];
         setProcessingStatus(`Compiling and mailing ${i + 1} of ${toSend.length}: ${cert.fullName}...`);
         try {
-          setPreviewRecord(cert);
-          await new Promise(resolve => setTimeout(resolve, 150));
-
-          const element = document.getElementById("certificate-pdf-capture");
-          if (!element) throw new Error("Capture container not found");
-
-          const canvas = await safeHtml2Canvas(element, { scale: 2, useCORS: true });
-          const imgData = canvas.toDataURL("image/png");
-          const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "letter" });
-          pdf.addImage(imgData, "PNG", 0, 0, 279.4, 215.9);
-          const pdfBase64 = await getPdfBase64(pdf);
+          const pdfBase64 = await generatePDFBase64FromIframe(cert);
           const fileName = `certificate_${cert.fullName.toLowerCase().replace(/\s+/g, "_")}.pdf`;
 
           const res = await fetch("/api/send-email", {
@@ -820,17 +742,54 @@ export default function AdminPanel({
     });
   };
 
-  // Bulk PDF printer
-  const handleBulkPrint = () => {
-    if (selectedRecordIds.length === 0) {
+  // Bulk ZIP Downloader
+  const handleBulkDownload = async () => {
+    const toDownload = selectedRecordIds.length > 0 
+      ? records.filter(r => selectedRecordIds.includes(r.id))
+      : records;
+      
+    if (toDownload.length === 0) {
       triggerToast("Please select at least one certificate from the table.", "error");
       return;
     }
-    const toPrint = records.filter(r => selectedRecordIds.includes(r.id));
-    toPrint.forEach((cert, idx) => {
-      setTimeout(() => {
-        handlePrintCertificate(cert);
-      }, idx * 1200);
+
+    triggerConfirm(`You are about to compile and download ${toDownload.length} PDF certificates into a ZIP folder. Proceed?`, async () => {
+      setIsProcessing(true);
+      const zip = new JSZip();
+
+      for (let i = 0; i < toDownload.length; i++) {
+        const cert = toDownload[i];
+        setProcessingStatus(`Compiling ${i + 1} of ${toDownload.length}: ${cert.fullName}...`);
+        try {
+          const pdfBase64 = await generatePDFBase64FromIframe(cert);
+          const base64Data = pdfBase64.split("base64,")[1] || pdfBase64;
+          const fileName = `certificate_${cert.fullName.toLowerCase().replace(/\s+/g, "_")}.pdf`;
+          zip.file(fileName, base64Data, { base64: true });
+        } catch (e: any) {
+          console.error(`Error processing PDF for ${cert.fullName}:`, e);
+        }
+      }
+
+      setProcessingStatus("Zipping files...");
+      try {
+        const content = await zip.generateAsync({ type: "blob" });
+        const url = URL.createObjectURL(content);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `certificates_bulk_${Date.now()}.zip`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        
+        triggerToast("Bulk download complete!", "success");
+      } catch (err) {
+        console.error("ZIP Generation Failed:", err);
+        triggerToast("Failed to generate ZIP file.", "error");
+      } finally {
+        setIsProcessing(false);
+        setProcessingStatus("");
+      }
     });
   };
 
@@ -1486,14 +1445,6 @@ export default function AdminPanel({
               {/* Bulk dispatchers */}
               <div className="flex items-center gap-1.5 flex-wrap">
                 <button
-                  onClick={handleBulkWhatsApp}
-                  className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-xl text-[10px] font-bold uppercase tracking-wide flex items-center gap-1 transition-all shadow-sm"
-                  title="Share PDFs via WhatsApp to selected recipients"
-                >
-                  <Share2 className="w-3.5 h-3.5" />
-                  <span>Share WhatsApp ({selectedRecordIds.length})</span>
-                </button>
-                <button
                   onClick={handleBulkEmail}
                   className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[10px] font-bold uppercase tracking-wide flex items-center gap-1 transition-all shadow-sm"
                   title="Email PDFs to selected recipients"
@@ -1502,8 +1453,9 @@ export default function AdminPanel({
                   <span>Email PDFs ({selectedRecordIds.length})</span>
                 </button>
                 <button
-                  onClick={handleBulkPrint}
+                  onClick={handleBulkDownload}
                   className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-[10px] font-bold uppercase tracking-wide flex items-center gap-1 transition-all"
+                  title="Download selected PDFs as a ZIP file"
                 >
                   <Download className="w-3.5 h-3.5" />
                   <span>Download PDFs ({selectedRecordIds.length})</span>
