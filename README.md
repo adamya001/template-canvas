@@ -48,10 +48,3 @@ Make sure to add the same `.env` variables to your Render Web Service configurat
 
 **Note on Database:**
 This project currently uses a local JSON file-based database (`data/*.json`). On Render, the local disk is ephemeral and resets on each deployment. For a persistent database, attach a Render Background Disk to your web service and set a `DB_DIR` environment variable pointing to the disk mount path (e.g., `/var/data`).
-
-## Admin Access
-To access the admin panel and all Pro features for free, sign in or sign up using the following credentials:
-- **Email:** `admin.canvas@gmail.com`
-- **Password:** `AdminCanvas@2024`
-
-*(Note: Since Clerk manages authentication, if this account hasn't been created on your specific Clerk instance yet, just click "Sign Up" and use these exact details. The system will automatically detect the email and grant full Admin privileges.)*
