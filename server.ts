@@ -453,7 +453,7 @@ app.get("/api/user/profile", async (req, res) => {
       const email = clerkUser.emailAddresses[0]?.emailAddress || "";
       const username = clerkUser.username || email.split("@")[0] || "user";
       const name = clerkUser.fullName || clerkUser.firstName || username;
-      const role = (email === "warlockadam234@gmail.com" || username.toLowerCase().startsWith("admin")) ? "admin" : "user";
+      const role = (email === "warlockadam234@gmail.com" || email === "admincanvas123@gmail.com" || username.toLowerCase().startsWith("admin")) ? "admin" : "user";
       
       userObj = {
         id: userId,
